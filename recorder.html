@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice Recorder</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --primary: #ef4444;
+      --primary-hover: #dc2626;
+      --text: #f8fafc;
+      --subtext: #94a3b8;
+      --border: #334155;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 460px;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .recorder-card {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      padding: 2rem;
+      text-align: center;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+
+    h2 {
+      font-size: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .status {
+      font-size: 0.875rem;
+      color: var(--subtext);
+      margin-bottom: 1.5rem;
+    }
+
+    .timer {
+      font-size: 2.5rem;
+      font-weight: bold;
+      font-variant-numeric: tabular-nums;
+      margin-bottom: 1rem;
+    }
+
+    canvas {
+      width: 100%;
+      height: 60px;
+      background-color: rgba(0, 0, 0, 0.2);
+      border-radius: 0.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .controls {
+      display: flex;
+      justify-content: center;
+      gap: 0.75rem;
+    }
+
+    button {
+      background-color: var(--border);
+      color: var(--text);
+      border: none;
+      padding: 0.75rem 1.25rem;
+      border-radius: 0.5rem;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    button.record {
+      background-color: var(--primary);
+    }
+
+    button.record:hover:not(:disabled) {
+      background-color: var(--primary-hover);
+    }
+
+    button:hover:not(:disabled) {
+      filter: brightness(1.2);
+    }
+
+    /* Recordings List Styles */
+    .recordings-header {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--subtext);
+      margin-bottom: 0.5rem;
+      display: none;
+    }
+
+    .recordings-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .recording-item {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    .recording-info {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.875rem;
+      color: var(--subtext);
+    }
+
+    .recording-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    audio {
+      width: 100%;
+      height: 40px;
+      border-radius: 0.5rem;
+    }
+
+    .btn-icon {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: #f87171;
+      padding: 0.4rem 0.6rem;
+      border-radius: 0.375rem;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+
+    .btn-icon:hover {
+      background-color: rgba(239, 68, 68, 0.1);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <div class="recorder-card">
+      <h2>Voice Recorder</h2>
+      <div class="status" id="status">Ready to record</div>
+      <div class="timer" id="timer">00:00</div>
+      
+      <canvas id="visualizer"></canvas>
+
+      <div class="controls">
+        <button id="recordBtn" class="record">⏺ Record</button>
+        <button id="pauseBtn" disabled>⏸ Pause</button>
+        <button id="stopBtn" disabled>⏹ Stop</button>
+      </div>
+    </div>
+
+    <div class="recordings-header" id="recordingsHeader">Your Recordings</div>
+    <div class="recordings-list" id="recordingsList"></div>
+  </div>
+
+  <script>
+    let mediaRecorder;
+    let audioChunks = [];
+    let timerInterval;
+    let audioCtx;
+    let analyser;
+    let animationFrameId;
+    let recordingCount = 0;
+
+    const recordBtn = document.getElementById('recordBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const statusText = document.getElementById('status');
+    const timerText = document.getElementById('timer');
+    const canvas = document.getElementById('visualizer');
+    const canvasCtx = canvas.getContext('2d');
+    const recordingsHeader = document.getElementById('recordingsHeader');
+    const recordingsList = document.getElementById('recordingsList');
+
+    canvas.width = canvas.offsetWidth;
+    canvas.height = canvas.offsetHeight;
+
+    recordBtn.addEventListener('click', startRecording);
+    pauseBtn.addEventListener('click', togglePause);
+    stopBtn.addEventListener('click', stopRecording);
+
+    async function startRecording() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        mediaRecorder = new MediaRecorder(stream);
+        audioChunks = [];
+
+        mediaRecorder.ondataavailable = event => {
+          if (event.data.size > 0) {
+            audioChunks.push(event.data);
+          }
+        };
+
+        mediaRecorder.onstop = handleStop;
+
+        mediaRecorder.start();
+        setupAudioContext(stream);
+
+        recordBtn.disabled = true;
+        pauseBtn.disabled = false;
+        stopBtn.disabled = false;
+        statusText.textContent = 'Recording...';
+
+        startTimer();
+        drawVisualizer();
+      } catch (err) {
+        statusText.textContent = 'Microphone access denied or unsupported.';
+        console.error('Error accessing microphone:', err);
+      }
+    }
+
+    function togglePause() {
+      if (mediaRecorder.state === 'recording') {
+        mediaRecorder.pause();
+        pauseTimer();
+        pauseBtn.textContent = '▶ Resume';
+        statusText.textContent = 'Paused';
+      } else if (mediaRecorder.state === 'paused') {
+        mediaRecorder.resume();
+        resumeTimer();
+        pauseBtn.textContent = '⏸ Pause';
+        statusText.textContent = 'Recording...';
+      }
+    }
+
+    function stopRecording() {
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+        mediaRecorder.stream.getTracks().forEach(track => track.stop());
+      }
+    }
+
+    function handleStop() {
+      stopTimer();
+      cancelAnimationFrame(animationFrameId);
+      clearCanvas();
+
+      recordBtn.disabled = false;
+      pauseBtn.disabled = true;
+      stopBtn.disabled = true;
+      pauseBtn.textContent = '⏸ Pause';
+      statusText.textContent = 'Recording saved below';
+
+      const mimeType = mediaRecorder.mimeType || 'audio/webm';
+      const audioBlob = new Blob(audioChunks, { type: mimeType });
+      const audioUrl = URL.createObjectURL(audioBlob);
+
+      recordingCount++;
+      addRecordingToList(audioUrl, recordingCount, elapsedTime);
+
+      elapsedTime = 0;
+      updateTimerDisplay();
+    }
+
+    function addRecordingToList(audioUrl, id, durationInSeconds) {
+      recordingsHeader.style.display = 'block';
+
+      const item = document.createElement('div');
+      item.className = 'recording-item';
+      item.id = `recording-${id}`;
+
+      const mins = Math.floor(durationInSeconds / 60).toString().padStart(2, '0');
+      const secs = (durationInSeconds % 60).toString().padStart(2, '0');
+
+      item.innerHTML = `
+        <div class="recording-info">
+          <span><strong>Recording ${id}</strong> (${mins}:${secs})</span>
+          <div class="recording-actions">
+            <button class="btn-icon" onclick="deleteRecording('${id}', '${audioUrl}')" title="Delete Recording">🗑 Delete</button>
+          </div>
+        </div>
+        <audio controls src="${audioUrl}"></audio>
+      `;
+
+      recordingsList.prepend(item);
+    }
+
+    window.deleteRecording = function(id, audioUrl) {
+      const item = document.getElementById(`recording-${id}`);
+      if (item) {
+        item.remove();
+        URL.revokeObjectURL(audioUrl);
+      }
+
+      if (recordingsList.children.length === 0) {
+        recordingsHeader.style.display = 'none';
+        statusText.textContent = 'Ready to record';
+      }
+    };
+
+    // --- Timer Logic ---
+    let elapsedTime = 0;
+
+    function startTimer() {
+      elapsedTime = 0;
+      updateTimerDisplay();
+      timerInterval = setInterval(() => {
+        elapsedTime++;
+        updateTimerDisplay();
+      }, 1000);
+    }
+
+    function pauseTimer() {
+      clearInterval(timerInterval);
+    }
+
+    function resumeTimer() {
+      timerInterval = setInterval(() => {
+        elapsedTime++;
+        updateTimerDisplay();
+      }, 1000);
+    }
+
+    function stopTimer() {
+      clearInterval(timerInterval);
+    }
+
+    function updateTimerDisplay() {
+      const minutes = Math.floor(elapsedTime / 60).toString().padStart(2, '0');
+      const seconds = (elapsedTime % 60).toString().padStart(2, '0');
+      timerText.textContent = `${minutes}:${seconds}`;
+    }
+
+    // --- Audio Visualizer ---
+    function setupAudioContext(stream) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      analyser = audioCtx.createAnalyser();
+      const source = audioCtx.createMediaStreamSource(stream);
+      source.connect(analyser);
+      analyser.fftSize = 64;
+    }
+
+    function drawVisualizer() {
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      function renderFrame() {
+        animationFrameId = requestAnimationFrame(renderFrame);
+        analyser.getByteFrequencyData(dataArray);
+
+        canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const barWidth = (canvas.width / bufferLength) * 1.5;
+        let x = 0;
+
+        for (let i = 0; i < bufferLength; i++) {
+          const barHeight = (dataArray[i] / 255) * canvas.height;
+
+          canvasCtx.fillStyle = '#ef4444';
+          canvasCtx.fillRect(x, canvas.height - barHeight, barWidth - 2, barHeight);
+
+          x += barWidth;
+        }
+      }
+
+      renderFrame();
+    }
+
+    function clearCanvas() {
+      canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+  </script>
+</body>
+</html>
